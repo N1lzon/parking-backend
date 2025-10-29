@@ -1,40 +1,19 @@
-Claro, aquí tienes el contenido listo para que lo copies y pegues directamente en tu archivo `README.md`.
-
-```markdown
 # Parking Backend 🚗
 
 Este es el repositorio para el backend de un sistema de gestión de estacionamiento. La API RESTful permite manejar usuarios, lugares de estacionamiento, y reservaciones.
 
+---
 ## Autores ✒️
 
 * **Nilson Casco**
 * **Juan Ovelar**
 * **Thamara Villalba**
 
-***
-
+---
 ## Estructura del Proyecto 📂
 
 El proyecto sigue una arquitectura organizada y modular para facilitar su mantenimiento y escalabilidad.
-
-```
-
-.
-├── src/
-│   ├── controllers/      \# Lógica de negocio y manejo de peticiones
-│   ├── database.js       \# Configuración de la conexión a MongoDB
-│   ├── libs/             \# Scripts de inicialización (ej. roles)
-│   ├── middlewares/      \# Funciones intermedias (auth, validaciones)
-│   ├── models/           \# Esquemas de datos de Mongoose
-│   └── routes/           \# Definición de los endpoints de la API
-├── .env.example          \# Plantilla para variables de entorno
-├── index.js              \# Punto de entrada de la aplicación
-└── package.json          \# Dependencias y scripts del proyecto
-
-````
-
-***
-
+---
 ## Instalación y Ejecución ⚙️
 
 Sigue estos pasos para levantar el servidor en tu entorno local.
@@ -63,8 +42,7 @@ Sigue estos pasos para levantar el servidor en tu entorno local.
     ```
     El servidor se iniciará en modo de desarrollo usando `nodemon`, generalmente en el puerto `3000`.
 
-***
-
+---
 ## Dependencias Principales 📦
 
 * **Express**: Framework web para Node.js.
@@ -76,18 +54,14 @@ Sigue estos pasos para levantar el servidor en tu entorno local.
 * **Helmet**: Ayuda a securizar las aplicaciones de Express estableciendo varias cabeceras HTTP.
 * **Morgan**: Logger de peticiones HTTP.
 
-***
-
+---
 ## Documentación de la API 📖
 
 La API está protegida y la mayoría de los endpoints requieren un token de autenticación (`x-access-token`) en la cabecera.
 
----
-
 ### Autenticación (`/api/auth`)
 
 #### `POST /api/auth/signup`
-
 Registra un nuevo usuario en el sistema.
 
 * **Body:**
@@ -107,7 +81,6 @@ Registra un nuevo usuario en el sistema.
     ```
 
 #### `POST /api/auth/signin`
-
 Inicia sesión y obtiene un token de autenticación.
 
 * **Body:**
@@ -125,35 +98,28 @@ Inicia sesión y obtiene un token de autenticación.
     ```
 
 ---
-
 ### Usuarios (`/api/users`)
 
 *Se requiere token de administrador.*
 
 #### `GET /api/users`
-
 Obtiene una lista de todos los usuarios.
 
 #### `GET /api/users/:id`
-
 Obtiene un usuario específico por su ID.
 
 #### `PUT /api/users/:id`
-
 Actualiza la información de un usuario.
 
 #### `DELETE /api/users/:id`
-
 Elimina un usuario del sistema.
 
 ---
-
 ### Estacionamiento (`/api/parking`)
 
 *Se requiere token de autenticación.*
 
 #### `POST /api/parking`
-
 Crea un nuevo lugar de estacionamiento. Se requiere rol de administrador.
 
 * **Body:**
@@ -177,29 +143,23 @@ Crea un nuevo lugar de estacionamiento. Se requiere rol de administrador.
     ```
 
 #### `GET /api/parking`
-
 Obtiene la lista de todos los lugares de estacionamiento.
 
 #### `GET /api/parking/:id`
-
 Obtiene un lugar de estacionamiento por su ID.
 
 #### `PUT /api/parking/:id`
-
 Actualiza un lugar de estacionamiento. Se requiere rol de administrador.
 
 #### `DELETE /api/parking/:id`
-
 Elimina un lugar de estacionamiento. Se requiere rol de administrador.
 
 ---
-
 ### Reservaciones (`/api/reservations`)
 
 *Se requiere token de autenticación.*
 
 #### `POST /api/reservations`
-
 Crea una nueva reservación. El `user` y `parking_spot` son IDs de MongoDB.
 
 * **Body:**
@@ -226,23 +186,16 @@ Crea una nueva reservación. El `user` y `parking_spot` son IDs de MongoDB.
     ```
 
 #### `GET /api/reservations`
-
 Obtiene todas las reservaciones (solo administradores).
 
 #### `GET /api/reservations/user/:userId`
-
 Obtiene todas las reservaciones de un usuario específico.
 
 #### `GET /api/reservations/:id`
-
 Obtiene una reservación por su ID.
 
 #### `PUT /api/reservations/:id`
-
 Actualiza una reservación (ej. para cambiar el estado o la hora).
 
 #### `DELETE /api/reservations/:id`
-
 Cancela o elimina una reservación.
-
-````
