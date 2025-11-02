@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import spaces, users, assignments, incidents, reports, websocket
+from app.routers import spaces, admin, usuarios_reserva, assignments, incidents, reports, websocket
 
 # Crear las tablas en la base de datos
 Base.metadata.create_all(bind=engine)
@@ -24,7 +24,8 @@ app.add_middleware(
 
 # Incluir routers
 app.include_router(spaces.router)
-app.include_router(users.router)
+app.include_router(admin.router)
+app.include_router(usuarios_reserva.router)
 app.include_router(assignments.router)
 app.include_router(incidents.router)
 app.include_router(reports.router)

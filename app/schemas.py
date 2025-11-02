@@ -2,41 +2,63 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
 
-# ============ USUARIO SCHEMAS ============
-class UsuarioBase(BaseModel):
+# ============ ADMIN SCHEMAS ============
+class AdminBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
     contraseña: str = Field(..., min_length=4)
 
-class UsuarioCreate(UsuarioBase):
+class AdminCreate(AdminBase):
     pass
 
-class UsuarioResponse(BaseModel):
+class AdminResponse(BaseModel):
     id: int
     nombre: str
     
     class Config:
         from_attributes = True
 
-class UsuarioLogin(BaseModel):
+class AdminLogin(BaseModel):
     nombre: str
     contraseña: str
 
 
+# ============ USUARIO RESERVA SCHEMAS ============
+class UsuarioReservaBase(BaseModel):
+    ci: int = Field(..., gt=0)
+    nombre: str = Field(..., min_length=1, max_length=100)
+
+class UsuarioReservaCreate(UsuarioReservaBase):
+    pass
+
+class UsuarioReservaUpdate(BaseModel):
+    nombre: Optional[str] = Field(None, min_length=1, max_length=100)
+
+class UsuarioReservaResponse(BaseModel):
+    ci: int
+    nombre: str
+    
+    class Config:
+        from_attributes = True
+
+
 # ============ ESPACIO SCHEMAS ============
 class EspacioBase(BaseModel):
-    numero_de_espacio: str
-    estado: str = "libre"  # libre, ocupado, reservado
+    numero_de_espacio: int = Field(..., gt=0)
+    estado: str = "libre"  # libre, ocupado
+    reservado: str = "no"  # si, no
 
 class EspacioCreate(EspacioBase):
     pass
 
 class EspacioUpdate(BaseModel):
     estado: Optional[str] = None
+    reservado: Optional[str] = None
 
 class EspacioResponse(BaseModel):
     id: int
-    numero_de_espacio: str
+    numero_de_espacio: int
     estado: str
+    reservado: str
     
     class Config:
         from_attributes = True
@@ -44,19 +66,20 @@ class EspacioResponse(BaseModel):
 
 # ============ ASIGNACION SCHEMAS ============
 class AsignacionBase(BaseModel):
+    ci_reserva: Optional[int] = None
     id_de_espacio: int
-    id_usuario: Optional[int] = None
 
 class AsignacionCreate(BaseModel):
-    id_usuario: Optional[int] = None  # Para usuarios especiales
+    ci: Optional[int] = None  # CI del usuario con reserva, o null para usuario normal
 
 class AsignacionResponse(BaseModel):
     id: int
+    ci_reserva: Optional[int]
     id_de_espacio: int
-    id_usuario: Optional[int]
-    asignado_a: datetime
-    liberado_a: Optional[datetime]
+    hora_asignado: datetime
+    hora_liberado: Optional[datetime]
     espacio: EspacioResponse
+    usuario_reserva: Optional[UsuarioReservaResponse] = None
     
     class Config:
         from_attributes = True

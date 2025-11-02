@@ -18,34 +18,65 @@ def init_database():
             return
         
         print("Creando 20 espacios de estacionamiento...")
-        # Crear 20 espacios
+        # Crear 20 espacios - primeros 5 reservados, resto no reservados
         for i in range(1, 21):
             espacio = schemas.EspacioCreate(
-                numero_de_espacio=f"{i:02d}",  # 01, 02, 03, ..., 20
-                estado="libre"
+                numero_de_espacio=i,
+                estado="libre",
+                reservado="si" if i <= 5 else "no"  # Primeros 5 son reservados
             )
             crud.create_espacio(db=db, espacio=espacio)
         
         print("✓ 20 espacios creados exitosamente")
+        print("  - Espacios 1-5: RESERVADOS")
+        print("  - Espacios 6-20: NO RESERVADOS")
         
-        # Crear algunos usuarios de ejemplo
-        print("\nCreando usuarios de ejemplo...")
-        usuarios_ejemplo = [
+        # Crear administradores
+        print("\nCreando administradores...")
+        admins_ejemplo = [
             {"nombre": "admin", "contraseña": "admin123"},
-            {"nombre": "juan.perez", "contraseña": "1234"},
-            {"nombre": "maria.gomez", "contraseña": "5678"}
+            {"nombre": "supervisor", "contraseña": "super123"}
         ]
         
-        for user_data in usuarios_ejemplo:
-            usuario = schemas.UsuarioCreate(**user_data)
-            crud.create_usuario(db=db, usuario=usuario)
-            print(f"✓ Usuario '{user_data['nombre']}' creado")
+        for admin_data in admins_ejemplo:
+            admin = schemas.AdminCreate(**admin_data)
+            crud.create_admin(db=db, admin=admin)
+            print(f"✓ Admin '{admin_data['nombre']}' creado")
         
-        print("\n¡Base de datos inicializada correctamente!")
-        print("\nCredenciales de prueba:")
-        print("  Usuario: admin | Contraseña: admin123")
-        print("  Usuario: juan.perez | Contraseña: 1234")
-        print("  Usuario: maria.gomez | Contraseña: 5678")
+        # Crear usuarios con derecho a reserva
+        print("\nCreando usuarios con derecho a reserva...")
+        usuarios_ejemplo = [
+            {"ci": 12345678, "nombre": "Juan Pérez"},
+            {"ci": 87654321, "nombre": "María Gómez"},
+            {"ci": 11223344, "nombre": "Carlos López"}
+        ]
+        
+        for usuario_data in usuarios_ejemplo:
+            usuario = schemas.UsuarioReservaCreate(**usuario_data)
+            crud.create_usuario_reserva(db=db, usuario=usuario)
+            print(f"✓ Usuario '{usuario_data['nombre']}' (CI: {usuario_data['ci']}) creado")
+        
+        print("\n" + "="*70)
+        print("¡Base de datos inicializada correctamente!")
+        print("="*70)
+        
+        print("\n🔐 CREDENCIALES DE ADMINISTRADORES:")
+        print("  Usuario: admin       | Contraseña: admin123")
+        print("  Usuario: supervisor  | Contraseña: super123")
+        
+        print("\n👤 USUARIOS CON DERECHO A RESERVA:")
+        print("  CI: 12345678 | Nombre: Juan Pérez")
+        print("  CI: 87654321 | Nombre: María Gómez")
+        print("  CI: 11223344 | Nombre: Carlos López")
+        
+        print("\n🅿️  ESPACIOS:")
+        print("  Espacios 1-5:   RESERVADOS (solo para usuarios con reserva)")
+        print("  Espacios 6-20:  NO RESERVADOS (para usuarios normales)")
+        
+        print("\n💡 FUNCIONAMIENTO:")
+        print("  • Usuario CON reserva (con CI): Se le asigna un espacio reservado (1-5)")
+        print("  • Usuario SIN reserva (sin CI): Se le asigna un espacio normal (6-20)")
+        print("  • Al liberar, el espacio vuelve a 'libre' pero mantiene su estado de reservado\n")
         
     except Exception as e:
         print(f"Error al inicializar la base de datos: {e}")

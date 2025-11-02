@@ -34,8 +34,8 @@ def get_espacio(espacio_id: int, db: Session = Depends(get_db)):
 
 @router.put("/{espacio_id}", response_model=schemas.EspacioResponse)
 def update_espacio(espacio_id: int, espacio_update: schemas.EspacioUpdate, db: Session = Depends(get_db)):
-    """Actualizar el estado de un espacio"""
-    espacio = crud.update_espacio_estado(db=db, espacio_id=espacio_id, nuevo_estado=espacio_update.estado)
+    """Actualizar un espacio (estado y/o reservado)"""
+    espacio = crud.update_espacio(db=db, espacio_id=espacio_id, espacio_update=espacio_update)
     if not espacio:
         raise HTTPException(status_code=404, detail="Espacio no encontrado")
     return espacio

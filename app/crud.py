@@ -1,33 +1,64 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
-from datetime import datetime, timedelta
+from sqlalchemy import func, and_, or_
+from datetime import datetime
 from typing import List, Optional
 from app import models, schemas
 
-# ============ USUARIOS ============
-def create_usuario(db: Session, usuario: schemas.UsuarioCreate):
-    db_usuario = models.Usuario(
-        nombre=usuario.nombre,
-        contraseña=usuario.contraseña  # En producción: hashear la contraseña
+# ============ ADMIN ============
+def create_admin(db: Session, admin: schemas.AdminCreate):
+    db_admin = models.Admin(
+        nombre=admin.nombre,
+        contraseña=admin.contraseña  # En producción: hashear la contraseña
     )
+    db.add(db_admin)
+    db.commit()
+    db.refresh(db_admin)
+    return db_admin
+
+def get_admin(db: Session, admin_id: int):
+    return db.query(models.Admin).filter(models.Admin.id == admin_id).first()
+
+def get_admin_by_nombre(db: Session, nombre: str):
+    return db.query(models.Admin).filter(models.Admin.nombre == nombre).first()
+
+def get_admins(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.Admin).offset(skip).limit(limit).all()
+
+def authenticate_admin(db: Session, nombre: str, contraseña: str):
+    admin = get_admin_by_nombre(db, nombre)
+    if not admin or admin.contraseña != contraseña:
+        return None
+    return admin
+
+
+# ============ USUARIOS RESERVA ============
+def create_usuario_reserva(db: Session, usuario: schemas.UsuarioReservaCreate):
+    db_usuario = models.UsuarioReserva(**usuario.model_dump())
     db.add(db_usuario)
     db.commit()
     db.refresh(db_usuario)
     return db_usuario
 
-def get_usuario(db: Session, usuario_id: int):
-    return db.query(models.Usuario).filter(models.Usuario.id == usuario_id).first()
+def get_usuario_reserva(db: Session, ci: int):
+    return db.query(models.UsuarioReserva).filter(models.UsuarioReserva.ci == ci).first()
 
-def get_usuario_by_nombre(db: Session, nombre: str):
-    return db.query(models.Usuario).filter(models.Usuario.nombre == nombre).first()
+def get_usuarios_reserva(db: Session, skip: int = 0, limit: int = 100):
+    return db.query(models.UsuarioReserva).offset(skip).limit(limit).all()
 
-def get_usuarios(db: Session, skip: int = 0, limit: int = 100):
-    return db.query(models.Usuario).offset(skip).limit(limit).all()
+def update_usuario_reserva(db: Session, ci: int, usuario_update: schemas.UsuarioReservaUpdate):
+    usuario = get_usuario_reserva(db, ci)
+    if usuario:
+        if usuario_update.nombre:
+            usuario.nombre = usuario_update.nombre
+        db.commit()
+        db.refresh(usuario)
+    return usuario
 
-def authenticate_usuario(db: Session, nombre: str, contraseña: str):
-    usuario = get_usuario_by_nombre(db, nombre)
-    if not usuario or usuario.contraseña != contraseña:
-        return None
+def delete_usuario_reserva(db: Session, ci: int):
+    usuario = get_usuario_reserva(db, ci)
+    if usuario:
+        db.delete(usuario)
+        db.commit()
     return usuario
 
 
@@ -42,38 +73,86 @@ def create_espacio(db: Session, espacio: schemas.EspacioCreate):
 def get_espacio(db: Session, espacio_id: int):
     return db.query(models.Espacio).filter(models.Espacio.id == espacio_id).first()
 
+def get_espacio_by_numero(db: Session, numero: int):
+    return db.query(models.Espacio).filter(models.Espacio.numero_de_espacio == numero).first()
+
 def get_espacios(db: Session):
     return db.query(models.Espacio).order_by(models.Espacio.numero_de_espacio).all()
 
-def get_espacios_disponibles(db: Session):
-    return db.query(models.Espacio).filter(models.Espacio.estado == "libre").all()
+def get_espacios_disponibles(db: Session, solo_no_reservados: bool = False):
+    """
+    Obtener espacios disponibles.
+    Si solo_no_reservados=True, solo devuelve espacios libres y no reservados (para usuarios normales)
+    Si solo_no_reservados=False, devuelve todos los espacios libres
+    """
+    query = db.query(models.Espacio).filter(models.Espacio.estado == "libre")
+    if solo_no_reservados:
+        query = query.filter(models.Espacio.reservado == "no")
+    return query.all()
 
-def update_espacio_estado(db: Session, espacio_id: int, nuevo_estado: str):
+def update_espacio(db: Session, espacio_id: int, espacio_update: schemas.EspacioUpdate):
     espacio = get_espacio(db, espacio_id)
     if espacio:
-        espacio.estado = nuevo_estado
+        if espacio_update.estado:
+            espacio.estado = espacio_update.estado
+        if espacio_update.reservado:
+            espacio.reservado = espacio_update.reservado
         db.commit()
         db.refresh(espacio)
     return espacio
 
 
 # ============ ASIGNACIONES ============
-def create_asignacion(db: Session, id_usuario: Optional[int] = None):
-    # Buscar un espacio disponible
-    espacio_disponible = db.query(models.Espacio).filter(
-        models.Espacio.estado == "libre"
-    ).first()
+def create_asignacion(db: Session, ci: Optional[int] = None):
+    """
+    Crear una nueva asignación de espacio.
+    - Si ci es None: usuario normal, buscar espacio libre NO reservado
+    - Si ci tiene valor: usuario con reserva, buscar espacio libre RESERVADO
+    """
     
-    if not espacio_disponible:
-        return None
+    if ci:
+        # Usuario con reserva
+        usuario = get_usuario_reserva(db, ci)
+        if not usuario:
+            return None  # Usuario no existe en tabla de reservas
+        
+        # Buscar espacio libre y reservado
+        espacio_disponible = db.query(models.Espacio).filter(
+            and_(
+                models.Espacio.estado == "libre",
+                models.Espacio.reservado == "si"
+            )
+        ).first()
+        
+        if not espacio_disponible:
+            return None  # No hay espacios reservados disponibles
+        
+        # Crear asignación con CI
+        db_asignacion = models.Asignacion(
+            ci_reserva=ci,
+            id_de_espacio=espacio_disponible.id
+        )
+        
+    else:
+        # Usuario normal
+        # Buscar espacio libre y NO reservado
+        espacio_disponible = db.query(models.Espacio).filter(
+            and_(
+                models.Espacio.estado == "libre",
+                models.Espacio.reservado == "no"
+            )
+        ).first()
+        
+        if not espacio_disponible:
+            return None  # No hay espacios disponibles
+        
+        # Crear asignación sin CI
+        db_asignacion = models.Asignacion(
+            ci_reserva=None,
+            id_de_espacio=espacio_disponible.id
+        )
     
-    # Crear asignación
-    db_asignacion = models.Asignacion(
-        id_de_espacio=espacio_disponible.id,
-        id_usuario=id_usuario
-    )
-    
-    # Actualizar estado del espacio
+    # Actualizar estado del espacio a ocupado
     espacio_disponible.estado = "ocupado"
     
     db.add(db_asignacion)
@@ -86,23 +165,23 @@ def get_asignacion(db: Session, asignacion_id: int):
 
 def get_asignaciones_activas(db: Session):
     return db.query(models.Asignacion).filter(
-        models.Asignacion.liberado_a == None
+        models.Asignacion.hora_liberado == None
     ).all()
 
 def get_asignaciones_by_date_range(db: Session, fecha_inicio: datetime, fecha_fin: datetime):
     return db.query(models.Asignacion).filter(
         and_(
-            models.Asignacion.asignado_a >= fecha_inicio,
-            models.Asignacion.asignado_a <= fecha_fin
+            models.Asignacion.hora_asignado >= fecha_inicio,
+            models.Asignacion.hora_asignado <= fecha_fin
         )
     ).all()
 
 def liberar_asignacion(db: Session, asignacion_id: int):
     asignacion = get_asignacion(db, asignacion_id)
-    if asignacion and not asignacion.liberado_a:
-        asignacion.liberado_a = datetime.now()
+    if asignacion and not asignacion.hora_liberado:
+        asignacion.hora_liberado = datetime.now()
         
-        # Liberar el espacio
+        # Liberar el espacio (cambiar estado a libre, mantener reservado como está)
         espacio = get_espacio(db, asignacion.id_de_espacio)
         if espacio:
             espacio.estado = "libre"
@@ -112,16 +191,17 @@ def liberar_asignacion(db: Session, asignacion_id: int):
     return asignacion
 
 def liberar_espacio(db: Session, espacio_id: int):
+    """Liberar un espacio directamente (simula sensor detectando salida)"""
     # Buscar asignación activa para este espacio
     asignacion = db.query(models.Asignacion).filter(
         and_(
             models.Asignacion.id_de_espacio == espacio_id,
-            models.Asignacion.liberado_a == None
+            models.Asignacion.hora_liberado == None
         )
     ).first()
     
     if asignacion:
-        asignacion.liberado_a = datetime.now()
+        asignacion.hora_liberado = datetime.now()
     
     # Actualizar estado del espacio
     espacio = get_espacio(db, espacio_id)
@@ -174,7 +254,7 @@ def get_estadisticas(db: Session, fecha_inicio: Optional[datetime] = None, fecha
     total_espacios = db.query(models.Espacio).count()
     espacios_disponibles = db.query(models.Espacio).filter(models.Espacio.estado == "libre").count()
     espacios_ocupados = db.query(models.Espacio).filter(models.Espacio.estado == "ocupado").count()
-    espacios_reservados = db.query(models.Espacio).filter(models.Espacio.estado == "reservado").count()
+    espacios_reservados = db.query(models.Espacio).filter(models.Espacio.reservado == "si").count()
     
     # Filtrar por rango de fechas si se proporciona
     query_asignaciones = db.query(models.Asignacion)
@@ -183,8 +263,8 @@ def get_estadisticas(db: Session, fecha_inicio: Optional[datetime] = None, fecha
     if fecha_inicio and fecha_fin:
         query_asignaciones = query_asignaciones.filter(
             and_(
-                models.Asignacion.asignado_a >= fecha_inicio,
-                models.Asignacion.asignado_a <= fecha_fin
+                models.Asignacion.hora_asignado >= fecha_inicio,
+                models.Asignacion.hora_asignado <= fecha_fin
             )
         )
         query_incidentes = query_incidentes.filter(
@@ -199,12 +279,12 @@ def get_estadisticas(db: Session, fecha_inicio: Optional[datetime] = None, fecha
     
     # Calcular promedio de horas de ocupación
     asignaciones_completadas = query_asignaciones.filter(
-        models.Asignacion.liberado_a != None
+        models.Asignacion.hora_liberado != None
     ).all()
     
     if asignaciones_completadas:
         total_horas = sum([
-            (asig.liberado_a - asig.asignado_a).total_seconds() / 3600
+            (asig.hora_liberado - asig.hora_asignado).total_seconds() / 3600
             for asig in asignaciones_completadas
         ])
         promedio_horas = total_horas / len(asignaciones_completadas)
