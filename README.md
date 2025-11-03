@@ -1,201 +1,402 @@
-# Parking Backend 🚗
 
-Este es el repositorio para el backend de un sistema de gestión de estacionamiento. La API RESTful permite manejar usuarios, lugares de estacionamiento, y reservaciones.
+# Sistema de Gestión de Estacionamiento - Backend
 
----
-## Autores ✒️
+Este es el repositorio para el backend de un sistema de gestión de estacionamiento, usando FastAPI para la gestión completa de un sistema de estacionamiento inteligente.
 
-* **Nilson Casco**
-* **Juan Ovelar**
-* **Thamara Villalba**
 
----
-## Estructura del Proyecto 📂
 
-El proyecto sigue una arquitectura organizada y modular para facilitar su mantenimiento y escalabilidad.
----
-## Instalación y Ejecución ⚙️
+## Autores
 
-Sigue estos pasos para levantar el servidor en tu entorno local.
+- [Nilson Casco](https://www.github.com/octokatherine)
+- [Juan Ovelar](https://github.com/JoMaiky)
+- [Thamara Villalba](https://github.com/Th4mx)
 
-1.  **Clonar el repositorio:**
-    ```bash
-    git clone [https://github.com/N1lzon/parking-backend.git](https://github.com/N1lzon/parking-backend.git)
-    cd parking-backend
-    ```
 
-2.  **Instalar dependencias:**
-    ```bash
-    npm install
-    ```
+##  📁 Estructura del Proyecto
 
-3.  **Configurar variables de entorno:**
-    Crea un archivo `.env` en la raíz del proyecto, basándote en `.env.example`, y define las variables necesarias como la URI de tu base de datos MongoDB y el secreto para JWT.
-    ```env
-    MONGODB_URI=mongodb://localhost/parkingdb
-    SECRET=your-secret-key
-    ```
+```bash
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py              # Punto de entrada de la aplicación
+│   ├── database.py          # Configuración de la base de datos
+│   ├── models.py            # Modelos SQLAlchemy
+│   ├── schemas.py           # Esquemas Pydantic para validación
+│   ├── crud.py              # Operaciones CRUD
+│   └── routers/
+│       ├── admin.py             # Endpoints de administradores
+│       ├── usuarios_reserva.py  # Endpoints de usuarios con reserva
+│       ├── spaces.py            # Endpoints de espacios
+│       ├── assignments.py       # Endpoints de asignaciones
+│       ├── incidents.py         # Endpoints de incidentes
+│       ├── reports.py           # Endpoints de reportes
+│       └── websocket.py         # WebSocket para tiempo real
+├── init_db.py               # Script de inicialización
+├── requirements.txt         # Dependencias del proyecto
+├── parking.db               # Base de datos SQLite (generada automáticamente)
+└── README.md
+```
 
-4.  **Ejecutar el servidor:**
-    ```bash
-    npm run dev
-    ```
-    El servidor se iniciará en modo de desarrollo usando `nodemon`, generalmente en el puerto `3000`.
+## Modelos de Datos
+### 👨‍💼 Admin
 
----
-## Dependencias Principales 📦
+Administradores del sistema con acceso al panel de control.
 
-* **Express**: Framework web para Node.js.
-* **Mongoose**: ODM para modelar datos de MongoDB.
-* **JSON Web Token (jsonwebtoken)**: Para la generación y verificación de tokens de autenticación.
-* **Bcrypt.js**: Para el hasheo y la comparación de contraseñas.
-* **Dotenv**: Para cargar variables de entorno desde un archivo `.env`.
-* **Cors**: Para habilitar el Cross-Origin Resource Sharing.
-* **Helmet**: Ayuda a securizar las aplicaciones de Express estableciendo varias cabeceras HTTP.
-* **Morgan**: Logger de peticiones HTTP.
+| Campo          | Tipo         | Descripción                        |
+| -------------- | ------------ | ---------------------------------- |
+| **id**         | Integer (PK) | Identificador único                |
+| **nombre**     | String       | Nombre de usuario                  |
+| **contraseña** | String       | Contraseña (sin hash en prototipo) |
 
----
-## Documentación de la API 📖
+### 👤 UsuarioReserva
 
-La API está protegida y la mayoría de los endpoints requieren un token de autenticación (`x-access-token`) en la cabecera.
+Usuarios autorizados para usar espacios reservados (docentes/empleados).
 
-### Autenticación (`/api/auth`)
+| Campo      | Tipo         | Descripción         |
+| ---------- | ------------ | ------------------- |
+| **ci**     | Integer (PK) | Cédula de identidad |
+| **nombre** | String       | Nombre completo     |
 
-#### `POST /api/auth/signup`
-Registra un nuevo usuario en el sistema.
+### 🅿️ Espacio
 
-* **Body:**
-    ```json
-    {
-      "username": "nuevo_usuario",
-      "email": "usuario@correo.com",
-      "password": "unaClaveSegura123",
-      "roles": ["user"]
-    }
-    ```
-* **Respuesta Exitosa (200 OK):**
-    ```json
-    {
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-    }
-    ```
+Espacios físicos de estacionamiento.
 
-#### `POST /api/auth/signin`
-Inicia sesión y obtiene un token de autenticación.
+| Campo                 | Tipo         | Descripción                            |
+| --------------------- | ------------ | -------------------------------------- |
+| **id**                | Integer (PK) | Identificador único                    |
+| **numero_de_espacio** | Integer      | Número visible del espacio (1–20)      |
+| **estado**            | String       | Estado actual: `"libre"` u `"ocupado"` |
+| **reservado**         | String       | Tipo de espacio: `"si"` o `"no"`       |
 
-* **Body:**
-    ```json
-    {
-      "email": "usuario@correo.com",
-      "password": "unaClaveSegura123"
-    }
-    ```
-* **Respuesta Exitosa (200 OK):**
-    ```json
-    {
-      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-    }
-    ```
+### 🚗 Asignacion
+
+Registro de asignaciones de espacios a vehículos.
+
+| Campo             | Tipo         | Descripción                                |
+| ----------------- | ------------ | ------------------------------------------ |
+| **id**            | Integer (PK) | Identificador único                        |
+| **ci_reserva**    | Integer (FK) | CI del usuario (null si es usuario normal) |
+| **id_de_espacio** | Integer (FK) | ID del espacio asignado                    |
+| **hora_asignado** | DateTime     | Timestamp de entrada                       |
+| **hora_liberado** | DateTime     | Timestamp de salida (null si activo)       |
+
+### ⚠️ Incidente
+
+Registro de incidentes en el estacionamiento.
+
+| Campo                 | Tipo         | Descripción                              |
+| --------------------- | ------------ | ---------------------------------------- |
+| **id**                | Integer (PK) | Identificador único                      |
+| **id_de_espacio**     | Integer (FK) | Espacio relacionado                      |
+| **tipo_de_incidente** | String       | Tipo: `"ocupación sin asignar"`, etc.    |
+| **hora_de_registro**  | DateTime     | Timestamp del incidente                  |
+| **hora_de_solucion**  | DateTime     | Timestamp de resolución (null si activo) |
+| **nota**              | Text         | Descripción opcional                     |
+
+## 🚀 Endpoints de la API
 
 ---
-### Usuarios (`/api/users`)
 
-*Se requiere token de administrador.*
+### 🔐 **Admin** — `/admin`
 
-#### `GET /api/users`
-Obtiene una lista de todos los usuarios.
+#### **POST** `/admin/login`
 
-#### `GET /api/users/:id`
-Obtiene un usuario específico por su ID.
+Autenticar un administrador.
 
-#### `PUT /api/users/:id`
-Actualiza la información de un usuario.
+**Body:**
 
-#### `DELETE /api/users/:id`
-Elimina un usuario del sistema.
+```json
+{
+  "nombre": "admin",
+  "contraseña": "admin123"
+}
+```
 
----
-### Estacionamiento (`/api/parking`)
+**Response (200):**
 
-*Se requiere token de autenticación.*
+```json
+{
+  "id": 1,
+  "nombre": "admin"
+}
+```
 
-#### `POST /api/parking`
-Crea un nuevo lugar de estacionamiento. Se requiere rol de administrador.
+**Errores:**
 
-* **Body:**
-    ```json
-    {
-      "spot_number": 101,
-      "location": "Piso 1, Sección A",
-      "is_available": true
-    }
-    ```
-* **Respuesta Exitosa (201 Created):**
-    ```json
-    {
-      "is_available": true,
-      "_id": "60d0fe4f5b3a0b3e4c8f3b2a",
-      "spot_number": 101,
-      "location": "Piso 1, Sección A",
-      "createdAt": "2025-10-28T23:58:39.988Z",
-      "updatedAt": "2025-10-28T23:58:39.988Z"
-    }
-    ```
-
-#### `GET /api/parking`
-Obtiene la lista de todos los lugares de estacionamiento.
-
-#### `GET /api/parking/:id`
-Obtiene un lugar de estacionamiento por su ID.
-
-#### `PUT /api/parking/:id`
-Actualiza un lugar de estacionamiento. Se requiere rol de administrador.
-
-#### `DELETE /api/parking/:id`
-Elimina un lugar de estacionamiento. Se requiere rol de administrador.
+* 401: Credenciales incorrectas
 
 ---
-### Reservaciones (`/api/reservations`)
 
-*Se requiere token de autenticación.*
+#### **POST** `/admin/`
 
-#### `POST /api/reservations`
-Crea una nueva reservación. El `user` y `parking_spot` son IDs de MongoDB.
+Crear un nuevo administrador.
 
-* **Body:**
-    ```json
-    {
-      "user": "60d0fe4f5b3a0b3e4c8f3b2b",
-      "parking_spot": "60d0fe4f5b3a0b3e4c8f3b2a",
-      "start_time": "2025-11-01T10:00:00.000Z",
-      "end_time": "2025-11-01T12:00:00.000Z"
-    }
-    ```
-* **Respuesta Exitosa (201 Created):**
-    ```json
-    {
-      "status": "confirmed",
-      "_id": "60d100b45b3a0b3e4c8f3b2d",
-      "user": "60d0fe4f5b3a0b3e4c8f3b2b",
-      "parking_spot": "60d0fe4f5b3a0b3e4c8f3b2a",
-      "start_time": "2025-11-01T10:00:00.000Z",
-      "end_time": "2025-11-01T12:00:00.000Z",
-      "createdAt": "2025-10-28T23:59:00.000Z",
-      "updatedAt": "2025-10-28T23:59:00.000Z"
-    }
-    ```
+**Body:**
 
-#### `GET /api/reservations`
-Obtiene todas las reservaciones (solo administradores).
+```json
+{
+  "nombre": "nuevo_admin",
+  "contraseña": "password123"
+}
+```
 
-#### `GET /api/reservations/user/:userId`
-Obtiene todas las reservaciones de un usuario específico.
+**Response (200):**
 
-#### `GET /api/reservations/:id`
-Obtiene una reservación por su ID.
+```json
+{
+  "id": 3,
+  "nombre": "nuevo_admin"
+}
+```
 
-#### `PUT /api/reservations/:id`
-Actualiza una reservación (ej. para cambiar el estado o la hora).
+**Errores:**
 
-#### `DELETE /api/reservations/:id`
-Cancela o elimina una reservación.
+* 400: Administrador ya existe
+
+---
+
+#### **GET** `/admin/`
+
+Obtener lista de administradores.
+
+**Query Params:**
+
+* `skip`: Número de registros a omitir (default: 0)
+* `limit`: Máximo de registros a retornar (default: 100)
+
+**Response (200):**
+
+```json
+[
+  { "id": 1, "nombre": "admin" },
+  { "id": 2, "nombre": "supervisor" }
+]
+```
+
+---
+
+### 👥 **Usuarios Reserva** — `/usuarios-reserva`
+
+#### **GET** `/usuarios-reserva/{ci}`
+
+Verificar si un CI tiene derecho a reserva.
+
+**Response (200):**
+
+```json
+{
+  "ci": 12345678,
+  "nombre": "Juan Pérez"
+}
+```
+
+**Errores:**
+
+* 404: Usuario no encontrado
+
+---
+
+#### **POST** `/usuarios-reserva/`
+
+Registrar un nuevo usuario con derecho a reserva.
+
+**Body:**
+
+```json
+{
+  "ci": 99887766,
+  "nombre": "Pedro Gómez"
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "ci": 99887766,
+  "nombre": "Pedro Gómez"
+}
+```
+
+**Errores:**
+
+* 400: Ya existe un usuario con ese CI
+
+---
+
+#### **GET** `/usuarios-reserva/`
+
+Listar todos los usuarios con derecho a reserva.
+
+**Response (200):**
+
+```json
+[
+  { "ci": 12345678, "nombre": "Juan Pérez" },
+  { "ci": 87654321, "nombre": "María Gómez" }
+]
+```
+
+---
+
+#### **PUT** `/usuarios-reserva/{ci}`
+
+Actualizar datos de un usuario con reserva.
+
+**Body:**
+
+```json
+{ "nombre": "Juan Carlos Pérez" }
+```
+
+**Response (200):**
+
+```json
+{
+  "ci": 12345678,
+  "nombre": "Juan Carlos Pérez"
+}
+```
+
+---
+
+#### **DELETE** `/usuarios-reserva/{ci}`
+
+Eliminar un usuario con derecho a reserva.
+
+**Response (200):**
+
+```json
+{ "message": "Usuario eliminado exitosamente" }
+```
+
+---
+
+### 🅿️ **Espacios** — `/espacios`
+
+#### **GET** `/espacios/`
+
+Obtener todos los espacios del estacionamiento.
+
+#### **GET** `/espacios/disponibles`
+
+Obtener solo espacios libres.
+
+#### **GET** `/espacios/{espacio_id}`
+
+Obtener un espacio específico.
+**Errores:**
+
+* 404: Espacio no encontrado
+
+#### **POST** `/espacios/`
+
+Crear un nuevo espacio (uso administrativo).
+
+#### **PUT** `/espacios/{espacio_id}`
+
+Actualizar un espacio (cambiar estado o reservado).
+
+*(Todas las respuestas siguen el mismo formato JSON de espacio)*
+
+---
+
+### 🚗 **Asignaciones** — `/asignaciones`
+
+#### **POST** `/asignaciones/`
+
+Solicitar un espacio de estacionamiento.
+
+* Si `ci` es null → asigna espacio **no reservado**.
+* Si `ci` tiene valor → asigna espacio **reservado**.
+
+#### **GET** `/asignaciones/activas`
+
+Obtener todas las asignaciones activas.
+
+#### **GET** `/asignaciones/{asignacion_id}`
+
+Obtener detalles de una asignación específica.
+
+#### **PUT** `/asignaciones/{asignacion_id}/liberar`
+
+Marcar salida de un vehículo.
+
+#### **PUT** `/asignaciones/espacio/{espacio_id}/liberar`
+
+Liberar un espacio directamente (simulación de sensor).
+
+---
+
+### 🚨 **Incidentes** — `/incidentes`
+
+#### **POST** `/incidentes/`
+
+Registrar un nuevo incidente.
+
+#### **GET** `/incidentes/activos`
+
+Obtener incidentes no resueltos.
+
+#### **GET** `/incidentes/{incidente_id}`
+
+Obtener detalles de un incidente.
+
+#### **PUT** `/incidentes/{incidente_id}/resolver`
+
+Marcar un incidente como resuelto.
+
+---
+
+### 📊 **Reportes** — `/reportes`
+
+#### **GET** `/reportes/estadisticas/actual`
+
+Obtener estadísticas generales del sistema.
+
+#### **POST** `/reportes/estadisticas`
+
+Obtener estadísticas en un rango de fechas.
+
+#### **POST** `/reportes/asignaciones`
+
+Obtener asignaciones en un rango de fechas.
+
+#### **POST** `/reportes/incidentes`
+
+Obtener incidentes en un rango de fechas.
+
+---
+
+### 🔌 **WebSocket** — `/ws`
+
+Conexión WebSocket para actualizaciones en tiempo real.
+**URL:** `ws://localhost:8000/ws`
+
+**Eventos emitidos:**
+
+```json
+{
+  "type": "espacio_update",
+  "data": { "espacio_id": 5, "estado": "ocupado" }
+}
+```
+
+```json
+{
+  "type": "nueva_asignacion",
+  "data": { "asignacion_id": 20, "espacio_id": 8 }
+}
+```
+
+```json
+{
+  "type": "nuevo_incidente",
+  "data": { "incidente_id": 9, "espacio_id": 12 }
+}
+```
+
+---
+
+
+
