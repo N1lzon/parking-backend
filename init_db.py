@@ -19,7 +19,7 @@ def init_database():
         
         print("Creando 20 espacios de estacionamiento...")
         # Crear 20 espacios - primeros 5 reservados, resto no reservados
-        for i in range(1, 21):
+        for i in range(1, 31):
             espacio = schemas.EspacioCreate(
                 numero_de_espacio=i,
                 estado="libre",
