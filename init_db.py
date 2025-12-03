@@ -4,32 +4,28 @@ from app import models, crud, schemas
 def init_database():
     """Inicializar la base de datos con datos de prueba"""
     
-    print("Creando tablas...")
+    print("Recreando tablas...")
+    # ⚠️ Esto elimina todas las tablas existentes
+    Base.metadata.drop_all(bind=engine)
+    # Y las vuelve a crear con la definición actual de models.py
     Base.metadata.create_all(bind=engine)
     
     db = SessionLocal()
     
     try:
-        # Verificar si ya hay datos
-        espacios_existentes = db.query(models.Espacio).count()
-        
-        if espacios_existentes > 0:
-            print("La base de datos ya tiene datos. No se inicializará nuevamente.")
-            return
-        
         print("Creando 20 espacios de estacionamiento...")
-        # Crear 20 espacios - primeros 5 reservados, resto no reservados
+        # Crear 30 espacios - primeros 5 reservados, resto no reservados
         for i in range(1, 31):
             espacio = schemas.EspacioCreate(
                 numero_de_espacio=i,
                 estado="libre",
-                reservado="si" if i <= 5 else "no"  # Primeros 5 son reservados
+                reservado="si" if i <= 5 else "no"
             )
             crud.create_espacio(db=db, espacio=espacio)
         
-        print("✓ 20 espacios creados exitosamente")
+        print("✓ 30 espacios creados exitosamente")
         print("  - Espacios 1-5: RESERVADOS")
-        print("  - Espacios 6-20: NO RESERVADOS")
+        print("  - Espacios 6-30: NO RESERVADOS")
         
         # Crear administradores
         print("\nCreando administradores...")
@@ -71,12 +67,7 @@ def init_database():
         
         print("\n🅿️  ESPACIOS:")
         print("  Espacios 1-5:   RESERVADOS (solo para usuarios con reserva)")
-        print("  Espacios 6-20:  NO RESERVADOS (para usuarios normales)")
-        
-        print("\n💡 FUNCIONAMIENTO:")
-        print("  • Usuario CON reserva (con CI): Se le asigna un espacio reservado (1-5)")
-        print("  • Usuario SIN reserva (sin CI): Se le asigna un espacio normal (6-20)")
-        print("  • Al liberar, el espacio vuelve a 'libre' pero mantiene su estado de reservado\n")
+        print("  Espacios 6-30:  NO RESERVADOS (para usuarios normales)")
         
     except Exception as e:
         print(f"Error al inicializar la base de datos: {e}")

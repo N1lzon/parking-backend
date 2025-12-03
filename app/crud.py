@@ -1,3 +1,4 @@
+import pytz
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from datetime import datetime
@@ -29,6 +30,14 @@ def authenticate_admin(db: Session, nombre: str, contraseña: str):
     if not admin or admin.contraseña != contraseña:
         return None
     return admin
+
+def delete_admin(db: Session, admin_id: int):
+    admin = get_admin(db, admin_id)
+    if admin:
+        db.delete(admin)
+        db.commit()
+    return admin
+
 
 
 # ============ USUARIOS RESERVA ============
@@ -300,3 +309,15 @@ def get_estadisticas(db: Session, fecha_inicio: Optional[datetime] = None, fecha
         "total_incidentes": total_incidentes,
         "promedio_horas_ocupacion": round(promedio_horas, 2)
     }
+
+def authenticate_admin(db: Session, nombre: str, contraseña: str):
+    admin = get_admin_by_nombre(db, nombre)
+    if not admin or admin.contraseña != contraseña:
+        return None
+    # Actualizar último login
+    paraguay_tz = pytz.timezone("America/Asuncion")
+
+    admin.ultimo_login = datetime.now(paraguay_tz)
+    db.commit()
+    db.refresh(admin)
+    return admin

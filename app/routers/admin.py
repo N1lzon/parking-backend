@@ -9,6 +9,13 @@ router = APIRouter(
     tags=["Admin"]
 )
 
+@router.delete("/{admin_id}")
+def delete_admin(admin_id: int, db: Session = Depends(get_db)):
+    db_admin = crud.delete_admin(db, admin_id)
+    if not db_admin:
+        raise HTTPException(status_code=404, detail="Administrador no encontrado")
+    return {"message": "Administrador eliminado exitosamente"}
+
 @router.post("/", response_model=schemas.AdminResponse)
 def create_admin(admin: schemas.AdminCreate, db: Session = Depends(get_db)):
     """Crear un nuevo administrador"""

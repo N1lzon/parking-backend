@@ -2,6 +2,10 @@ from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.database import Base
+import pytz
+from datetime import datetime
+
+paraguay_tz = pytz.timezone("America/Asuncion")
 
 class Admin(Base):
     __tablename__ = "admin"
@@ -9,6 +13,8 @@ class Admin(Base):
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(100), nullable=False, unique=True)
     contraseña = Column(String(255), nullable=False)  # En producción usar hash
+    fecha_creacion = Column(DateTime(timezone=True), default=lambda: datetime.now(paraguay_tz))
+    ultimo_login = Column(DateTime(timezone=True), nullable=True)
 
 
 class UsuarioReserva(Base):

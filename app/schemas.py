@@ -130,3 +130,26 @@ class EstadisticasResponse(BaseModel):
 class WebSocketMessage(BaseModel):
     type: str  # "espacio_update", "nueva_asignacion", "nuevo_incidente"
     data: dict
+
+
+class AdminBase(BaseModel):
+    nombre: str
+
+class AdminCreate(AdminBase):
+    contraseña: str
+
+class AdminUpdate(BaseModel):
+    nombre: Optional[str] = None
+    contraseña: Optional[str] = None
+
+class AdminResponse(AdminBase):
+    id: int
+    fecha_creacion: Optional[datetime]
+    ultimo_login: Optional[datetime]
+
+    class Config:
+        orm_mode = True
+
+class AdminLogin(BaseModel):
+    nombre: str
+    contraseña: str
