@@ -9,6 +9,31 @@ router = APIRouter(
     tags=["Asignaciones"]
 )
 
+# ============================================================
+# NUEVO: Endpoint /solicitar (para compatibilidad con frontend)
+# ============================================================
+
+@router.post("/solicitar", response_model=schemas.AsignacionResponse)
+def solicitar_espacio(asignacion: schemas.AsignacionCreate, db: Session = Depends(get_db)):
+    """
+    Solicitar un espacio de estacionamiento.
+    - Si ci es None, es un usuario normal (anónimo).
+    - Si ci tiene valor, busca la reserva asociada.
+    
+    Este endpoint es usado por el User Interface (pantalla táctil).
+    """
+    db_asignacion = crud.create_asignacion(db=db, ci=asignacion.ci)
+    if not db_asignacion:
+        if asignacion.ci:
+            raise HTTPException(status_code=404, detail="No se encontró la reserva o no hay espacios disponibles")
+        else:
+            raise HTTPException(status_code=404, detail="No hay espacios disponibles")
+    return db_asignacion
+
+# ============================================================
+# ENDPOINTS ORIGINALES (mantener para compatibilidad)
+# ============================================================
+
 @router.post("/", response_model=schemas.AsignacionResponse)
 def create_asignacion(asignacion: schemas.AsignacionCreate, db: Session = Depends(get_db)):
     """

@@ -1,7 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import spaces, admin, usuarios_reserva, assignments, incidents, reports, websocket
+from app.routers import spaces, admin, usuarios_reserva, assignments, incidents, reports, websocket, ayuda
+
 
 # Crear las tablas en la base de datos
 Base.metadata.create_all(bind=engine)
@@ -28,8 +29,13 @@ app.include_router(admin.router)
 app.include_router(usuarios_reserva.router)
 app.include_router(assignments.router)
 app.include_router(incidents.router)
-app.include_router(reports.router)
+app.include_router(reports.router)  # ← Solo una vez, reports.py ya tiene prefix="/reports"
 app.include_router(websocket.router)
+app.include_router(ayuda.router)
+
+
+# IMPORTANTE: ¡Eliminada la línea duplicada!
+# app.include_router(reports.router, prefix="/reports", tags=["reports"])  # ← ELIMINADO
 
 @app.get("/")
 def read_root():

@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
 
+
 # ============ ADMIN SCHEMAS ============
 class AdminBase(BaseModel):
     nombre: str = Field(..., min_length=1, max_length=100)
@@ -153,3 +154,23 @@ class AdminResponse(AdminBase):
 class AdminLogin(BaseModel):
     nombre: str
     contraseña: str
+
+class SolicitudAyudaBase(BaseModel):
+    ubicacion: Optional[str] = None
+
+class SolicitudAyudaCreate(SolicitudAyudaBase):
+    pass
+
+class SolicitudAyudaUpdate(BaseModel):
+    atendida: Optional[bool] = None
+    notas: Optional[str] = None
+
+class SolicitudAyudaResponse(SolicitudAyudaBase):
+    id: int
+    fecha_hora: datetime
+    atendida: bool
+    fecha_hora_atencion: Optional[datetime] = None
+    notas: Optional[str] = None
+    
+    class Config:
+        from_attributes = True

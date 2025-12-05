@@ -4,6 +4,10 @@ from sqlalchemy.sql import func
 from app.database import Base
 import pytz
 from datetime import datetime
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text
+from datetime import datetime
+from .database import Base
+
 
 paraguay_tz = pytz.timezone("America/Asuncion")
 
@@ -66,3 +70,16 @@ class Incidente(Base):
     
     # Relación
     espacio = relationship("Espacio", back_populates="incidentes")
+
+class SolicitudAyuda(Base):
+    __tablename__ = "solicitudes_ayuda"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    fecha_hora = Column(DateTime, nullable=False, default=datetime.now)
+    atendida = Column(Boolean, default=False)
+    fecha_hora_atencion = Column(DateTime, nullable=True)
+    notas = Column(Text, nullable=True)
+    ubicacion = Column(String(100), nullable=True)
+    
+    def __repr__(self):
+        return f"<SolicitudAyuda(id={self.id}, fecha_hora={self.fecha_hora}, atendida={self.atendida})>"

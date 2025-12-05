@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, case, extract
+from sqlalchemy import func, and_, case, extract, cast, Date
 from datetime import datetime, timedelta
 from typing import Optional
 from app.database import get_db
@@ -11,7 +11,58 @@ import pytz
 # Zona horaria de Asunción
 paraguay_tz = pytz.timezone("America/Asuncion")
 
-router = APIRouter(prefix="/reportes", tags=["Reportes"])
+# IMPORTANTE: Cambiar prefix a "/reports" para que coincida con main.py
+router = APIRouter(prefix="/reports", tags=["Reports"])
+
+# ============================================================
+# NUEVO ENDPOINT - Vehículos por día (últimos 7 días)
+# ============================================================
+
+@router.get("/vehiculos-por-dia")
+def obtener_vehiculos_por_dia(db: Session = Depends(get_db)):
+    """
+    Obtiene la cantidad de vehículos que ingresaron en los últimos 7 días.
+    Retorna una lista con la fecha y la cantidad de vehículos.
+    """
+    # Calcular fecha de hace 7 días
+    fecha_inicio = datetime.now() - timedelta(days=7)
+    
+    # Obtener todas las asignaciones de los últimos 7 días
+    asignaciones = db.query(Asignacion).filter(
+        Asignacion.hora_asignado >= fecha_inicio
+    ).all()
+    
+    # Crear diccionario para contar por día
+    datos_por_dia = {}
+    
+    # Inicializar con ceros para los últimos 7 días
+    for i in range(7):
+        fecha = (datetime.now() - timedelta(days=6-i)).date()
+        datos_por_dia[fecha.isoformat()] = 0
+    
+    # Contar asignaciones por día
+    for asignacion in asignaciones:
+        if asignacion.hora_asignado:
+            fecha_str = asignacion.hora_asignado.date().isoformat()
+            if fecha_str in datos_por_dia:
+                datos_por_dia[fecha_str] += 1
+    
+    # Convertir a lista con formato final
+    dias_semana = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+    datos_finales = []
+    for fecha_str in sorted(datos_por_dia.keys()):
+        fecha_obj = datetime.fromisoformat(fecha_str)
+        datos_finales.append({
+            "fecha": fecha_str,
+            "cantidad": datos_por_dia[fecha_str],
+            "dia": dias_semana[fecha_obj.weekday()]
+        })
+    
+    return datos_finales
+
+# ============================================================
+# TUS ENDPOINTS EXISTENTES (sin cambios)
+# ============================================================
 
 @router.get("/completo")
 async def get_reporte_completo(db: Session = Depends(get_db)):
@@ -377,54 +428,3 @@ async def get_modelo_asignacion(db: Session = Depends(get_db)):
         }
     except Exception as e:
         return {"error": str(e)}
-async def get_debug_info(db: Session = Depends(get_db)):
-    """
-    Endpoint de debug para verificar el estado de las tablas
-    """
-    try:
-        info = {
-            "espacios": {
-                "total": db.query(Espacio).count(),
-                "libres": db.query(Espacio).filter(Espacio.estado == "libre").count(),
-                "ocupados": db.query(Espacio).filter(Espacio.estado == "ocupado").count(),
-                "reservados_si": db.query(Espacio).filter(Espacio.reservado == "si").count(),
-            },
-            "asignaciones": {
-                "existe_tabla": True,
-                "total": 0,
-                "activas": 0,
-                "finalizadas": 0
-            },
-            "incidentes": {
-                "existe_tabla": True,
-                "total": 0
-            }
-        }
-        
-        try:
-            info["asignaciones"]["total"] = db.query(Asignacion).count()
-            # Activas = sin hora_salida
-            info["asignaciones"]["activas"] = db.query(Asignacion).filter(
-                Asignacion.hora_salida.is_(None)
-            ).count()
-            # Finalizadas = con hora_entrada Y hora_salida
-            info["asignaciones"]["finalizadas"] = db.query(Asignacion).filter(
-                and_(
-                    Asignacion.hora_entrada.isnot(None),
-                    Asignacion.hora_salida.isnot(None)
-                )
-            ).count()
-        except Exception as e:
-            info["asignaciones"]["existe_tabla"] = False
-            info["asignaciones"]["error"] = str(e)
-        
-        try:
-            info["incidentes"]["total"] = db.query(Incidente).count()
-        except Exception as e:
-            info["incidentes"]["existe_tabla"] = False
-            info["incidentes"]["error"] = str(e)
-        
-        return info
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
