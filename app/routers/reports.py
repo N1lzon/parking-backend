@@ -1,430 +1,653 @@
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, case, extract, cast, Date
+from sqlalchemy import func
 from datetime import datetime, timedelta
-from typing import Optional
-from app.database import get_db
-from app.models import Espacio, Asignacion, Incidente
-import math
-import pytz
+from ..database import get_db
+from ..models import Asignacion, Espacio, Incidente
+from collections import defaultdict
 
-# Zona horaria de Asunción
-paraguay_tz = pytz.timezone("America/Asuncion")
+# Importar SolicitudAyuda solo si existe
+try:
+    from ..models import SolicitudAyuda
+    AYUDA_DISPONIBLE = True
+except ImportError:
+    AYUDA_DISPONIBLE = False
+    print("⚠️  Tabla SolicitudAyuda no disponible")
 
-# IMPORTANTE: Cambiar prefix a "/reports" para que coincida con main.py
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
-# ============================================================
-# NUEVO ENDPOINT - Vehículos por día (últimos 7 días)
-# ============================================================
-
-@router.get("/vehiculos-por-dia")
-def obtener_vehiculos_por_dia(db: Session = Depends(get_db)):
+def get_semana_actual():
     """
-    Obtiene la cantidad de vehículos que ingresaron en los últimos 7 días.
-    Retorna una lista con la fecha y la cantidad de vehículos.
-    """
-    # Calcular fecha de hace 7 días
-    fecha_inicio = datetime.now() - timedelta(days=7)
-    
-    # Obtener todas las asignaciones de los últimos 7 días
-    asignaciones = db.query(Asignacion).filter(
-        Asignacion.hora_asignado >= fecha_inicio
-    ).all()
-    
-    # Crear diccionario para contar por día
-    datos_por_dia = {}
-    
-    # Inicializar con ceros para los últimos 7 días
-    for i in range(7):
-        fecha = (datetime.now() - timedelta(days=6-i)).date()
-        datos_por_dia[fecha.isoformat()] = 0
-    
-    # Contar asignaciones por día
-    for asignacion in asignaciones:
-        if asignacion.hora_asignado:
-            fecha_str = asignacion.hora_asignado.date().isoformat()
-            if fecha_str in datos_por_dia:
-                datos_por_dia[fecha_str] += 1
-    
-    # Convertir a lista con formato final
-    dias_semana = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
-    datos_finales = []
-    for fecha_str in sorted(datos_por_dia.keys()):
-        fecha_obj = datetime.fromisoformat(fecha_str)
-        datos_finales.append({
-            "fecha": fecha_str,
-            "cantidad": datos_por_dia[fecha_str],
-            "dia": dias_semana[fecha_obj.weekday()]
-        })
-    
-    return datos_finales
-
-# ============================================================
-# TUS ENDPOINTS EXISTENTES (sin cambios)
-# ============================================================
-
-@router.get("/completo")
-async def get_reporte_completo(db: Session = Depends(get_db)):
-    """
-    Genera un reporte completo con todas las métricas del sistema
+    Obtener el rango de fechas de la semana actual (Lunes a Domingo)
     """
     try:
-        # Estadísticas básicas de espacios
-        total_espacios = db.query(Espacio).count()
-        espacios_ocupados = db.query(Espacio).filter(Espacio.estado == "ocupado").count()
+        hoy = datetime.now()
+        dias_desde_lunes = hoy.weekday()
+        lunes = hoy - timedelta(days=dias_desde_lunes)
+        domingo = lunes + timedelta(days=6)
         
-        # En tu BD usas "libre" en lugar de "disponible"
-        espacios_disponibles = db.query(Espacio).filter(Espacio.estado == "libre").count()
+        fecha_inicio = lunes.replace(hour=0, minute=0, second=0, microsecond=0)
+        fecha_fin = domingo.replace(hour=23, minute=59, second=59, microsecond=999999)
         
-        # Espacios reservados son aquellos marcados como reservado='si' y disponibles
-        espacios_reservados = db.query(Espacio).filter(
-            and_(
-                Espacio.reservado == "si",
-                Espacio.estado == "libre"
-            )
-        ).count()
-        
-        print(f"DEBUG - Espacios: total={total_espacios}, ocupados={espacios_ocupados}, libres={espacios_disponibles}, reservados={espacios_reservados}")
-        
-        # Porcentaje de ocupación
-        porcentaje_ocupacion = round((espacios_ocupados / total_espacios * 100), 2) if total_espacios > 0 else 0
-        
-        # Asignaciones
-        try:
-            total_asignaciones = db.query(Asignacion).count()
-            # Asignaciones activas = las que NO tienen hora_liberado (aún no se han liberado)
-            asignaciones_activas = db.query(Asignacion).filter(
-                Asignacion.hora_liberado.is_(None)
-            ).count()
-            print(f"DEBUG - Asignaciones: total={total_asignaciones}, activas={asignaciones_activas}")
-        except Exception as e:
-            print(f"Error consultando asignaciones: {e}")
-            total_asignaciones = 0
-            asignaciones_activas = 0
-        
-        # Tiempo promedio de ocupación (en horas)
-        tiempo_promedio = 0
-        try:
-            # Asignaciones finalizadas = tienen hora_asignado Y hora_liberado
-            asignaciones_finalizadas = db.query(Asignacion).filter(
-                and_(
-                    Asignacion.hora_asignado.isnot(None),
-                    Asignacion.hora_liberado.isnot(None)
-                )
-            ).all()
-            
-            if asignaciones_finalizadas:
-                tiempos = []
-                for asig in asignaciones_finalizadas:
-                    if asig.hora_asignado and asig.hora_liberado:
-                        duracion = asig.hora_liberado - asig.hora_asignado
-                        tiempos.append(duracion.total_seconds() / 3600)  # Convertir a horas
-                tiempo_promedio = round(sum(tiempos) / len(tiempos), 2) if tiempos else 0
-                print(f"DEBUG - Asignaciones finalizadas: {len(asignaciones_finalizadas)}, tiempo promedio: {tiempo_promedio}h")
-        except Exception as e:
-            print(f"Error calculando tiempo promedio: {e}")
-            tiempo_promedio = 0
-        
-        # Incidentes
-        try:
-            total_incidentes = db.query(Incidente).count()
-        except Exception as e:
-            print(f"Error consultando incidentes: {e}")
-            total_incidentes = 0
-        
-        # Horas pico - Análisis de asignaciones por hora
-        horas_pico = calcular_horas_pico(db)
-        
-        # Métricas adicionales
-        # Estimación de veces que el estacionamiento estuvo lleno
-        estacionamiento_lleno = math.floor(total_asignaciones * 0.15)
-        
-        # Solicitudes rechazadas (estimado basado en incidentes)
-        solicitudes_rechazadas = math.floor(total_asignaciones * 0.08)
-        
-        # Asignaciones no utilizadas (nunca llegaron a usarse - sin hora_liberado por mucho tiempo)
-        try:
-            asignaciones_no_utilizadas = 0  # Por ahora 0, necesitaríamos lógica de expiración
-        except Exception as e:
-            print(f"Error consultando asignaciones no utilizadas: {e}")
-            asignaciones_no_utilizadas = 0
-        
-        # Ocupaciones sin asignar (de la tabla de incidentes)
-        try:
-            ocupaciones_sin_asignar = db.query(Incidente).filter(
-                Incidente.tipo_de_incidente == "ocupacion_sin_asignacion"
-            ).count()
-        except Exception as e:
-            print(f"Error consultando ocupaciones sin asignar: {e}")
-            ocupaciones_sin_asignar = 0
-        
-        # Construir respuesta
-        reporte = {
-            "fecha_generacion": datetime.now().isoformat(),
-            "estadisticas": {
-                "total_espacios": total_espacios,
-                "espacios_ocupados": espacios_ocupados,
-                "espacios_disponibles": espacios_disponibles,
-                "espacios_reservados": espacios_reservados,
-                "total_asignaciones": total_asignaciones,
-                "asignaciones_activas": asignaciones_activas,
-                "total_incidentes": total_incidentes
-            },
-            "metricas": {
-                "total_vehiculos": total_asignaciones,
-                "tiempo_promedio": tiempo_promedio,
-                "porcentaje_ocupacion": int(porcentaje_ocupacion),
-                "estacionamiento_lleno": estacionamiento_lleno,
-                "solicitudes_rechazadas": solicitudes_rechazadas,
-                "asignaciones_no_utilizadas": asignaciones_no_utilizadas,
-                "ocupaciones_sin_asignar": ocupaciones_sin_asignar
-            },
-            "horas_pico": horas_pico,
-            "distribucion": {
-                "disponibles": espacios_disponibles - espacios_reservados,  # Libres sin reservar
-                "ocupados": espacios_ocupados,
-                "reservados": espacios_reservados
-            }
-        }
-        
-        return reporte
-        
+        return fecha_inicio, fecha_fin
     except Exception as e:
-        print(f"Error completo en get_reporte_completo: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error al generar reporte: {str(e)}")
+        print(f"Error en get_semana_actual: {e}")
+        hoy = datetime.now()
+        fecha_fin = hoy
+        fecha_inicio = hoy - timedelta(days=7)
+        return fecha_inicio, fecha_fin
 
-
-@router.get("/por-fecha")
-async def get_reporte_por_fecha(
-    fecha_inicio: Optional[str] = Query(None, description="Fecha inicio (YYYY-MM-DD)"),
-    fecha_fin: Optional[str] = Query(None, description="Fecha fin (YYYY-MM-DD)"),
+@router.get("/rango-detallado")
+def obtener_reporte_rango_detallado(
+    fecha_inicio: str,
+    fecha_fin: str,
     db: Session = Depends(get_db)
 ):
-    """
-    Genera un reporte filtrado por rango de fechas
-    """
+    """Obtener reporte con métricas desglosadas por día (para Excel)"""
     try:
-        # Si no se especifican fechas, usar últimos 30 días
-        if not fecha_inicio or not fecha_fin:
-            fecha_fin_dt = datetime.now()
-            fecha_inicio_dt = fecha_fin_dt - timedelta(days=30)
-        else:
-            fecha_inicio_dt = datetime.strptime(fecha_inicio, "%Y-%m-%d")
-            fecha_fin_dt = datetime.strptime(fecha_fin, "%Y-%m-%d")
+        # Convertir strings a datetime
+        fecha_inicio_dt = datetime.fromisoformat(fecha_inicio).replace(hour=0, minute=0, second=0, microsecond=0)
+        fecha_fin_dt = datetime.fromisoformat(fecha_fin).replace(hour=23, minute=59, second=59, microsecond=999999)
         
-        # Asignaciones en el rango de fechas
-        asignaciones = db.query(Asignacion).filter(
-            and_(
-                Asignacion.hora_asignacion >= fecha_inicio_dt,
-                Asignacion.hora_asignacion <= fecha_fin_dt
-            )
+        # ============================================================
+        # MÉTRICAS POR DÍA
+        # ============================================================
+        metricas_por_dia = []
+        
+        # Iterar cada día en el rango
+        fecha_actual = fecha_inicio_dt
+        while fecha_actual <= fecha_fin_dt:
+            dia_inicio = fecha_actual.replace(hour=0, minute=0, second=0, microsecond=0)
+            dia_fin = fecha_actual.replace(hour=23, minute=59, second=59, microsecond=999999)
+            
+            # Asignaciones del día
+            asignaciones_dia = db.query(Asignacion).filter(
+                Asignacion.hora_asignado >= dia_inicio,
+                Asignacion.hora_asignado <= dia_fin
+            ).all()
+            
+            # Calcular tiempo promedio del día
+            tiempos = []
+            for asig in asignaciones_dia:
+                if asig.hora_liberado:
+                    hora_asignado = asig.hora_asignado.replace(tzinfo=None) if asig.hora_asignado.tzinfo else asig.hora_asignado
+                    hora_liberado = asig.hora_liberado.replace(tzinfo=None) if asig.hora_liberado.tzinfo else asig.hora_liberado
+                    tiempo = (hora_liberado - hora_asignado).total_seconds() / 3600
+                    if tiempo > 0:
+                        tiempos.append(tiempo)
+            
+            tiempo_promedio = round(sum(tiempos) / len(tiempos), 1) if tiempos else 0
+            
+            # Solicitudes de ayuda del día
+            solicitudes_ayuda = 0
+            if AYUDA_DISPONIBLE:
+                try:
+                    solicitudes_ayuda = db.query(SolicitudAyuda).filter(
+                        SolicitudAyuda.fecha_hora >= dia_inicio,
+                        SolicitudAyuda.fecha_hora <= dia_fin
+                    ).count()
+                except:
+                    pass
+            
+            # Estacionamiento lleno del día
+            estacionamiento_lleno = db.query(Incidente).filter(
+                Incidente.tipo_de_incidente == "estacionamiento_lleno",
+                Incidente.hora_de_registro >= dia_inicio,
+                Incidente.hora_de_registro <= dia_fin
+            ).count()
+            
+            # Solicitudes rechazadas del día
+            solicitudes_rechazadas = db.query(Incidente).filter(
+                Incidente.tipo_de_incidente == "solicitud_rechazada",
+                Incidente.hora_de_registro >= dia_inicio,
+                Incidente.hora_de_registro <= dia_fin
+            ).count()
+            
+            # Incidentes manuales del día
+            incidentes_dia = db.query(Incidente).filter(
+                Incidente.hora_de_registro >= dia_inicio,
+                Incidente.hora_de_registro <= dia_fin,
+                Incidente.tipo_de_incidente.notin_(["estacionamiento_lleno", "solicitud_rechazada"])
+            ).count()
+            
+            metricas_por_dia.append({
+                "fecha": fecha_actual.date().isoformat(),
+                "total_vehiculos": len(asignaciones_dia),
+                "tiempo_promedio": tiempo_promedio,
+                "solicitudes_ayuda": solicitudes_ayuda,
+                "estacionamiento_lleno": estacionamiento_lleno,
+                "solicitudes_rechazadas": solicitudes_rechazadas,
+                "incidentes_manuales": incidentes_dia
+            })
+            
+            # Siguiente día
+            fecha_actual += timedelta(days=1)
+        
+        # ============================================================
+        # HORAS PICO (del rango completo)
+        # ============================================================
+        asignaciones_rango = db.query(Asignacion).filter(
+            Asignacion.hora_asignado >= fecha_inicio_dt,
+            Asignacion.hora_asignado <= fecha_fin_dt
         ).all()
         
-        total_asignaciones = len(asignaciones)
+        horas_ocupacion = {}
+        for asig in asignaciones_rango:
+            hora = asig.hora_asignado.hour
+            horas_ocupacion[hora] = horas_ocupacion.get(hora, 0) + 1
+        
+        horas_pico_list = sorted(
+            [{"hora": f"{h:02d}:00-{(h+1):02d}:00", "ocupacion": count} 
+             for h, count in horas_ocupacion.items()],
+            key=lambda x: x["ocupacion"],
+            reverse=True
+        )[:10]  # Top 10 horas
+        
+        if horas_pico_list:
+            max_ocupacion = horas_pico_list[0]["ocupacion"]
+            for hora in horas_pico_list:
+                hora["ocupacion"] = round((hora["ocupacion"] / max_ocupacion * 100), 0) if max_ocupacion > 0 else 0
+        
+        # ============================================================
+        # INCIDENTES (del rango completo)
+        # ============================================================
+        incidentes_lista = db.query(Incidente).filter(
+            Incidente.hora_de_registro >= fecha_inicio_dt,
+            Incidente.hora_de_registro <= fecha_fin_dt
+        ).order_by(Incidente.hora_de_registro.desc()).all()
+        
+        incidentes_dict = []
+        for inc in incidentes_lista:
+            incidentes_dict.append({
+                "id": inc.id,
+                "tipo_de_incidente": inc.tipo_de_incidente,
+                "hora_de_registro": inc.hora_de_registro.isoformat(),
+                "hora_de_solucion": inc.hora_de_solucion.isoformat() if inc.hora_de_solucion else None,
+                "nota": inc.nota,
+                "id_de_espacio": inc.id_de_espacio,
+                "espacio": {
+                    "numero_de_espacio": inc.espacio.numero_de_espacio if inc.espacio else None
+                }
+            })
+        
+        print(f"📊 REPORTE DETALLADO:")
+        print(f"   Rango: {fecha_inicio} - {fecha_fin}")
+        print(f"   Días: {len(metricas_por_dia)}")
+        print(f"   Incidentes: {len(incidentes_dict)}")
+        
+        return {
+            "periodo": {
+                "inicio": fecha_inicio_dt.isoformat(),
+                "fin": fecha_fin_dt.isoformat()
+            },
+            "metricas_por_dia": metricas_por_dia,
+            "horas_pico": horas_pico_list,
+            "incidentes": incidentes_dict
+        }
+        
+    except Exception as e:
+        print(f"❌ Error en /reports/rango-detallado: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/rango")
+def obtener_reporte_rango(
+    fecha_inicio: str,
+    fecha_fin: str,
+    db: Session = Depends(get_db)
+):
+    """Obtener reporte para un rango de fechas específico"""
+    try:
+        # Convertir strings a datetime
+        fecha_inicio_dt = datetime.fromisoformat(fecha_inicio).replace(hour=0, minute=0, second=0, microsecond=0)
+        fecha_fin_dt = datetime.fromisoformat(fecha_fin).replace(hour=23, minute=59, second=59, microsecond=999999)
+        
+        # Obtener todos los espacios
+        espacios = db.query(Espacio).all()
+        total_espacios = len(espacios)
+        
+        if total_espacios == 0:
+            return {
+                "periodo": {
+                    "tipo": "personalizado",
+                    "inicio": fecha_inicio_dt.isoformat(),
+                    "fin": fecha_fin_dt.isoformat()
+                },
+                "estadisticas": {"total_incidentes": 0, "semana_actual": False},
+                "metricas": {
+                    "total_vehiculos": 0,
+                    "tiempo_promedio": 0,
+                    "porcentaje_ocupacion": 0,
+                    "solicitudes_ayuda": 0,
+                    "estacionamiento_lleno": 0,
+                    "solicitudes_rechazadas": 0,
+                    "asignaciones_no_utilizadas": 0
+                },
+                "horas_pico": [],
+                "distribucion": {
+                    "disponibles": 0,
+                    "ocupados": 0,
+                    "reservados": 0,
+                    "total": 0
+                },
+                "incidentes": []
+            }
+        
+        espacios_disponibles = len([e for e in espacios if e.estado == 'libre'])
+        espacios_ocupados = len([e for e in espacios if e.estado == 'ocupado'])
+        espacios_reservados = len([e for e in espacios if e.reservado == 'si'])
+        
+        # Obtener asignaciones del rango
+        asignaciones_rango = db.query(Asignacion).filter(
+            Asignacion.hora_asignado >= fecha_inicio_dt,
+            Asignacion.hora_asignado <= fecha_fin_dt
+        ).all()
+        
+        total_vehiculos = len(asignaciones_rango)
         
         # Calcular tiempo promedio
         tiempos = []
-        for asig in asignaciones:
-            if asig.hora_entrada and asig.hora_salida:
-                duracion = asig.hora_salida - asig.hora_entrada
-                tiempos.append(duracion.total_seconds() / 3600)
+        for asig in asignaciones_rango:
+            if asig.hora_liberado:
+                hora_asignado = asig.hora_asignado.replace(tzinfo=None) if asig.hora_asignado.tzinfo else asig.hora_asignado
+                hora_liberado = asig.hora_liberado.replace(tzinfo=None) if asig.hora_liberado.tzinfo else asig.hora_liberado
+                
+                tiempo = (hora_liberado - hora_asignado).total_seconds() / 3600
+                
+                if tiempo > 0:
+                    tiempos.append(tiempo)
         
-        tiempo_promedio = round(sum(tiempos) / len(tiempos), 2) if tiempos else 0
+        tiempo_promedio = round(sum(tiempos) / len(tiempos), 1) if tiempos else 0
         
-        # Incidentes en el rango
-        incidentes = db.query(Incidente).filter(
-            and_(
-                Incidente.fecha_hora >= fecha_inicio_dt,
-                Incidente.fecha_hora <= fecha_fin_dt
-            )
+        # Porcentaje de ocupación actual
+        porcentaje_ocupacion = round((espacios_ocupados / total_espacios * 100), 0) if total_espacios > 0 else 0
+        
+        # Solicitudes de ayuda
+        solicitudes_ayuda = 0
+        if AYUDA_DISPONIBLE:
+            try:
+                solicitudes_ayuda = db.query(SolicitudAyuda).filter(
+                    SolicitudAyuda.fecha_hora >= fecha_inicio_dt,
+                    SolicitudAyuda.fecha_hora <= fecha_fin_dt
+                ).count()
+            except:
+                pass
+        
+        # Horas pico
+        horas_ocupacion = {}
+        for asig in asignaciones_rango:
+            hora = asig.hora_asignado.hour
+            horas_ocupacion[hora] = horas_ocupacion.get(hora, 0) + 1
+        
+        horas_pico_list = sorted(
+            [{"hora": f"{h:02d}:00-{(h+1):02d}:00", "ocupacion": count} 
+             for h, count in horas_ocupacion.items()],
+            key=lambda x: x["ocupacion"],
+            reverse=True
+        )[:3]
+        
+        if horas_pico_list:
+            max_ocupacion = horas_pico_list[0]["ocupacion"]
+            for hora in horas_pico_list:
+                hora["ocupacion"] = round((hora["ocupacion"] / max_ocupacion * 100), 0) if max_ocupacion > 0 else 0
+        
+        # Estacionamiento lleno
+        estacionamiento_lleno = db.query(Incidente).filter(
+            Incidente.tipo_de_incidente == "estacionamiento_lleno",
+            Incidente.hora_de_registro >= fecha_inicio_dt,
+            Incidente.hora_de_registro <= fecha_fin_dt
         ).count()
         
-        reporte = {
-            "periodo": {
-                "fecha_inicio": fecha_inicio_dt.strftime("%Y-%m-%d"),
-                "fecha_fin": fecha_fin_dt.strftime("%Y-%m-%d")
-            },
-            "total_asignaciones": total_asignaciones,
-            "tiempo_promedio_estacionamiento": tiempo_promedio,
-            "total_incidentes": incidentes,
-            "asignaciones_por_dia": agrupar_por_dia(asignaciones)
-        }
+        # Solicitudes rechazadas
+        solicitudes_rechazadas = db.query(Incidente).filter(
+            Incidente.tipo_de_incidente == "solicitud_rechazada",
+            Incidente.hora_de_registro >= fecha_inicio_dt,
+            Incidente.hora_de_registro <= fecha_fin_dt
+        ).count()
         
-        return reporte
+        # Asignaciones no utilizadas
+        asignaciones_no_utilizadas = 0
+        for asig in asignaciones_rango:
+            if asig.hora_liberado:
+                duracion_segundos = (asig.hora_liberado - asig.hora_asignado).total_seconds()
+                if duracion_segundos < 60:
+                    asignaciones_no_utilizadas += 1
         
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al generar reporte: {str(e)}")
-
-
-def calcular_horas_pico(db: Session):
-    """
-    Calcula las horas con mayor ocupación basándose en las asignaciones
-    """
-    try:
-        # Obtener todas las asignaciones con hora_asignado
-        asignaciones = db.query(Asignacion).filter(
-            Asignacion.hora_asignado.isnot(None)
-        ).all()
+        # Incidentes manuales
+        total_incidentes = db.query(Incidente).filter(
+            Incidente.hora_de_registro >= fecha_inicio_dt,
+            Incidente.hora_de_registro <= fecha_fin_dt,
+            Incidente.tipo_de_incidente.notin_(["estacionamiento_lleno", "solicitud_rechazada"])
+        ).count()
         
-        # Contar asignaciones por hora (convertir a zona horaria de Paraguay)
-        horas_contador = {}
-        for asig in asignaciones:
-            if asig.hora_asignado:
-                # Convertir a zona horaria de Asunción
-                hora_local = asig.hora_asignado.astimezone(paraguay_tz)
-                hora = hora_local.hour
-                horas_contador[hora] = horas_contador.get(hora, 0) + 1
+        # Lista completa de incidentes
+        incidentes_lista = db.query(Incidente).filter(
+            Incidente.hora_de_registro >= fecha_inicio_dt,
+            Incidente.hora_de_registro <= fecha_fin_dt
+        ).order_by(Incidente.hora_de_registro.desc()).all()
         
-        # Obtener las 3 horas con más actividad
-        top_horas = sorted(horas_contador.items(), key=lambda x: x[1], reverse=True)[:3]
-        
-        # Calcular porcentaje de ocupación para cada hora pico
-        total_espacios = db.query(Espacio).count()
-        horas_pico = []
-        
-        for hora, cantidad in top_horas:
-            porcentaje = round((cantidad / total_espacios * 100), 2) if total_espacios > 0 else 0
-            # Limitar el porcentaje a 100%
-            porcentaje = min(porcentaje, 100)
-            
-            horas_pico.append({
-                "hora": f"{hora:02d}:00-{(hora+1):02d}:00",
-                "ocupacion": int(porcentaje)
+        incidentes_dict = []
+        for inc in incidentes_lista:
+            incidentes_dict.append({
+                "id": inc.id,
+                "tipo_de_incidente": inc.tipo_de_incidente,
+                "hora_de_registro": inc.hora_de_registro.isoformat(),
+                "hora_de_solucion": inc.hora_de_solucion.isoformat() if inc.hora_de_solucion else None,
+                "nota": inc.nota,
+                "id_de_espacio": inc.id_de_espacio,
+                "espacio": {
+                    "numero_de_espacio": inc.espacio.numero_de_espacio if inc.espacio else None
+                }
             })
         
-        # Si no hay datos suficientes, devolver horas pico típicas
-        if not horas_pico:
-            horas_pico = [
-                {"hora": "08:00-09:00", "ocupacion": 85},
-                {"hora": "12:00-13:00", "ocupacion": 78},
-                {"hora": "18:00-19:00", "ocupacion": 82}
-            ]
-        
-        return horas_pico
-        
-    except Exception as e:
-        # En caso de error, devolver valores por defecto
-        print(f"Error calculando horas pico: {e}")
-        return [
-            {"hora": "08:00-09:00", "ocupacion": 85},
-            {"hora": "12:00-13:00", "ocupacion": 78},
-            {"hora": "18:00-19:00", "ocupacion": 82}
-        ]
-
-
-def agrupar_por_dia(asignaciones):
-    """
-    Agrupa las asignaciones por día
-    """
-    dias = {}
-    for asig in asignaciones:
-        fecha = asig.hora_asignacion.date().isoformat()
-        dias[fecha] = dias.get(fecha, 0) + 1
-    
-    return [{"fecha": fecha, "cantidad": cantidad} for fecha, cantidad in sorted(dias.items())]
-
-
-@router.get("/estadisticas/actual")
-async def get_estadisticas_actual(db: Session = Depends(get_db)):
-    """
-    Endpoint original - mantener compatibilidad
-    """
-    try:
-        # Contar espacios totales
-        total_espacios = db.query(Espacio).count()
-        
-        # Contar por estado - tu BD usa "libre" en lugar de "disponible"
-        espacios_ocupados = db.query(Espacio).filter(Espacio.estado == "ocupado").count()
-        espacios_disponibles = db.query(Espacio).filter(Espacio.estado == "libre").count()
-        
-        # Contar espacios reservados (pueden estar libres pero marcados como reservados)
-        espacios_reservados = db.query(Espacio).filter(
-            and_(
-                Espacio.reservado == "si",
-                Espacio.estado == "libre"
-            )
-        ).count()
-        
-        # Contar asignaciones e incidentes
-        try:
-            total_asignaciones = db.query(Asignacion).count()
-        except:
-            total_asignaciones = 0
-            
-        try:
-            total_incidentes = db.query(Incidente).count()
-        except:
-            total_incidentes = 0
-        
-        print(f"DEBUG estadisticas/actual - Total asignaciones: {total_asignaciones}, Total incidentes: {total_incidentes}")
-        
-        # Calcular promedio de horas de ocupación
-        promedio_horas = 0
-        try:
-            # Asignaciones finalizadas = tienen hora_asignado Y hora_liberado
-            asignaciones_finalizadas = db.query(Asignacion).filter(
-                and_(
-                    Asignacion.hora_asignado.isnot(None),
-                    Asignacion.hora_liberado.isnot(None)
-                )
-            ).all()
-            
-            if asignaciones_finalizadas:
-                tiempos = []
-                for asig in asignaciones_finalizadas:
-                    if asig.hora_asignado and asig.hora_liberado:
-                        duracion = asig.hora_liberado - asig.hora_asignado
-                        tiempos.append(duracion.total_seconds() / 3600)
-                promedio_horas = round(sum(tiempos) / len(tiempos), 2) if tiempos else 0
-        except Exception as e:
-            print(f"Error calculando promedio de horas: {e}")
-            promedio_horas = 0
+        print(f"📊 REPORTE PERSONALIZADO:")
+        print(f"   Rango: {fecha_inicio} - {fecha_fin}")
+        print(f"   Vehículos: {total_vehiculos}")
+        print(f"   Incidentes: {len(incidentes_dict)}")
         
         return {
-            "total_espacios": total_espacios,
-            "espacios_ocupados": espacios_ocupados,
-            "espacios_disponibles": espacios_disponibles,
-            "espacios_reservados": espacios_reservados,
-            "total_asignaciones": total_asignaciones,
-            "total_incidentes": total_incidentes,
-            "promedio_horas_ocupacion": promedio_horas
+            "periodo": {
+                "tipo": "personalizado",
+                "inicio": fecha_inicio_dt.isoformat(),
+                "fin": fecha_fin_dt.isoformat()
+            },
+            "estadisticas": {
+                "total_incidentes": total_incidentes,
+                "semana_actual": False
+            },
+            "metricas": {
+                "total_vehiculos": total_vehiculos,
+                "tiempo_promedio": tiempo_promedio,
+                "porcentaje_ocupacion": int(porcentaje_ocupacion),
+                "solicitudes_ayuda": solicitudes_ayuda,
+                "estacionamiento_lleno": estacionamiento_lleno,
+                "solicitudes_rechazadas": solicitudes_rechazadas,
+                "asignaciones_no_utilizadas": asignaciones_no_utilizadas
+            },
+            "horas_pico": horas_pico_list,
+            "distribucion": {
+                "disponibles": espacios_disponibles,
+                "ocupados": espacios_ocupados,
+                "reservados": espacios_reservados,
+                "total": total_espacios
+            },
+            "incidentes": incidentes_dict
         }
         
     except Exception as e:
-        print(f"Error completo en estadisticas/actual: {e}")
+        print(f"❌ Error en /reports/rango: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.get("/debug/modelo-asignacion")
-async def get_modelo_asignacion(db: Session = Depends(get_db)):
-    """
-    Endpoint para ver qué campos tiene el modelo Asignacion
-    """
+@router.get("/completo")
+def obtener_reporte_completo(db: Session = Depends(get_db)):
+    """Obtener reporte completo del sistema para la semana actual"""
     try:
-        from sqlalchemy import inspect
-        inspector = inspect(Asignacion)
-        campos = [column.name for column in inspector.columns]
+        fecha_inicio, fecha_fin = get_semana_actual()
         
-        # También intentar obtener una asignación de ejemplo
-        asignacion_ejemplo = db.query(Asignacion).first()
-        ejemplo_dict = None
-        if asignacion_ejemplo:
-            ejemplo_dict = {
-                col: str(getattr(asignacion_ejemplo, col, None)) 
-                for col in campos
+        # Obtener todos los espacios
+        espacios = db.query(Espacio).all()
+        total_espacios = len(espacios)
+        
+        if total_espacios == 0:
+            return {
+                "periodo": {
+                    "tipo": "semana_actual",
+                    "inicio": fecha_inicio.isoformat(),
+                    "fin": fecha_fin.isoformat()
+                },
+                "estadisticas": {"total_incidentes": 0, "semana_actual": True},
+                "metricas": {
+                    "total_vehiculos": 0,
+                    "tiempo_promedio": 0,
+                    "porcentaje_ocupacion": 0,
+                    "solicitudes_ayuda": 0,
+                    "estacionamiento_lleno": 0,
+                    "solicitudes_rechazadas": 0,
+                    "asignaciones_no_utilizadas": 0
+                },
+                "horas_pico": [],
+                "distribucion": {
+                    "disponibles": 0,
+                    "ocupados": 0,
+                    "reservados": 0,
+                    "total": 0
+                }
             }
         
+        espacios_disponibles = len([e for e in espacios if e.estado == 'libre'])
+        espacios_ocupados = len([e for e in espacios if e.estado == 'ocupado'])
+        espacios_reservados = len([e for e in espacios if e.reservado == 'si'])
+        
+        # Obtener asignaciones de la semana
+        asignaciones_semana = db.query(Asignacion).filter(
+            Asignacion.hora_asignado >= fecha_inicio,
+            Asignacion.hora_asignado <= fecha_fin
+        ).all()
+        
+        total_vehiculos = len(asignaciones_semana)
+        
+        # Calcular tiempo promedio
+        tiempos = []
+        for asig in asignaciones_semana:
+            if asig.hora_liberado:
+                # Convertir a naive datetime para evitar problemas de timezone
+                hora_asignado = asig.hora_asignado.replace(tzinfo=None) if asig.hora_asignado.tzinfo else asig.hora_asignado
+                hora_liberado = asig.hora_liberado.replace(tzinfo=None) if asig.hora_liberado.tzinfo else asig.hora_liberado
+                
+                tiempo = (hora_liberado - hora_asignado).total_seconds() / 3600
+                
+                # Solo agregar tiempos positivos (válidos)
+                if tiempo > 0:
+                    tiempos.append(tiempo)
+                else:
+                    print(f"⚠️ Tiempo negativo detectado: Asignación {asig.id} - {tiempo:.2f}h")
+        
+        tiempo_promedio = round(sum(tiempos) / len(tiempos), 1) if tiempos else 0
+        
+        # Porcentaje de ocupación actual
+        porcentaje_ocupacion = round((espacios_ocupados / total_espacios * 100), 0) if total_espacios > 0 else 0
+        
+        # Solicitudes de ayuda
+        solicitudes_ayuda = 0
+        if AYUDA_DISPONIBLE:
+            try:
+                solicitudes_ayuda = db.query(SolicitudAyuda).filter(
+                    SolicitudAyuda.fecha_hora >= fecha_inicio,
+                    SolicitudAyuda.fecha_hora <= fecha_fin
+                ).count()
+            except:
+                pass
+        
+        # ============================================================
+        # HORAS PICO
+        # ============================================================
+        horas_ocupacion = {}
+        for asig in asignaciones_semana:
+            hora = asig.hora_asignado.hour
+            horas_ocupacion[hora] = horas_ocupacion.get(hora, 0) + 1
+        
+        horas_pico_list = sorted(
+            [{"hora": f"{h:02d}:00-{(h+1):02d}:00", "ocupacion": count} 
+             for h, count in horas_ocupacion.items()],
+            key=lambda x: x["ocupacion"],
+            reverse=True
+        )[:3]
+        
+        if horas_pico_list:
+            max_ocupacion = horas_pico_list[0]["ocupacion"]
+            for hora in horas_pico_list:
+                hora["ocupacion"] = round((hora["ocupacion"] / max_ocupacion * 100), 0) if max_ocupacion > 0 else 0
+        
+        # ============================================================
+        # ESTACIONAMIENTO LLENO - Contar desde tabla INCIDENTES
+        # ============================================================
+        estacionamiento_lleno = db.query(Incidente).filter(
+            Incidente.tipo_de_incidente == "estacionamiento_lleno",
+            Incidente.hora_de_registro >= fecha_inicio,
+            Incidente.hora_de_registro <= fecha_fin
+        ).count()
+        
+        print(f"📊 Estacionamiento lleno esta semana: {estacionamiento_lleno} veces (desde incidentes)")
+        
+        # ============================================================
+        # SOLICITUDES RECHAZADAS - Contar desde tabla INCIDENTES
+        # ============================================================
+        solicitudes_rechazadas = db.query(Incidente).filter(
+            Incidente.tipo_de_incidente == "solicitud_rechazada",
+            Incidente.hora_de_registro >= fecha_inicio,
+            Incidente.hora_de_registro <= fecha_fin
+        ).count()
+        
+        print(f"🚫 Solicitudes rechazadas esta semana: {solicitudes_rechazadas}")
+        
+        # ============================================================
+        # ASIGNACIONES NO UTILIZADAS - Por implementar
+        # ============================================================
+        # Criterio: Asignaciones que fueron liberadas en menos de 1 minuto
+        asignaciones_no_utilizadas = 0
+        for asig in asignaciones_semana:
+            if asig.hora_liberado:
+                duracion_segundos = (asig.hora_liberado - asig.hora_asignado).total_seconds()
+                if duracion_segundos < 60:  # Menos de 1 minuto
+                    asignaciones_no_utilizadas += 1
+        
+        # ============================================================
+        # INCIDENTES TOTALES (excluyendo automáticos)
+        # ============================================================
+        # Total de incidentes MANUALES (no automáticos)
+        total_incidentes = db.query(Incidente).filter(
+            Incidente.hora_de_registro >= fecha_inicio,
+            Incidente.hora_de_registro <= fecha_fin,
+            # Excluir incidentes automáticos del sistema
+            Incidente.tipo_de_incidente.notin_(["estacionamiento_lleno", "solicitud_rechazada"])
+        ).count()
+        
+        # ============================================================
+        # LISTA COMPLETA DE INCIDENTES (para exportación)
+        # ============================================================
+        incidentes_lista = db.query(Incidente).filter(
+            Incidente.hora_de_registro >= fecha_inicio,
+            Incidente.hora_de_registro <= fecha_fin
+        ).order_by(Incidente.hora_de_registro.desc()).all()
+        
+        # Convertir a diccionarios para JSON
+        incidentes_dict = []
+        for inc in incidentes_lista:
+            incidentes_dict.append({
+                "id": inc.id,
+                "tipo_de_incidente": inc.tipo_de_incidente,
+                "hora_de_registro": inc.hora_de_registro.isoformat(),
+                "hora_de_solucion": inc.hora_de_solucion.isoformat() if inc.hora_de_solucion else None,
+                "nota": inc.nota,
+                "id_de_espacio": inc.id_de_espacio,
+                "espacio": {
+                    "numero_de_espacio": inc.espacio.numero_de_espacio if inc.espacio else None
+                }
+            })
+        
+        print(f"📊 RESUMEN SEMANA:")
+        print(f"   Vehículos: {total_vehiculos}")
+        print(f"   Estacionamiento lleno: {estacionamiento_lleno} veces")
+        print(f"   Solicitudes rechazadas: {solicitudes_rechazadas}")
+        print(f"   Asignaciones no utilizadas: {asignaciones_no_utilizadas}")
+        print(f"   Incidentes manuales: {total_incidentes}")
+        
         return {
-            "campos_del_modelo": campos,
-            "total_asignaciones": db.query(Asignacion).count(),
-            "ejemplo": ejemplo_dict
+            "periodo": {
+                "tipo": "semana_actual",
+                "inicio": fecha_inicio.isoformat(),
+                "fin": fecha_fin.isoformat()
+            },
+            "estadisticas": {
+                "total_incidentes": total_incidentes,
+                "semana_actual": True
+            },
+            "metricas": {
+                "total_vehiculos": total_vehiculos,
+                "tiempo_promedio": tiempo_promedio,
+                "porcentaje_ocupacion": int(porcentaje_ocupacion),
+                "solicitudes_ayuda": solicitudes_ayuda,
+                "estacionamiento_lleno": estacionamiento_lleno,
+                "solicitudes_rechazadas": solicitudes_rechazadas,
+                "asignaciones_no_utilizadas": asignaciones_no_utilizadas
+            },
+            "horas_pico": horas_pico_list,
+            "distribucion": {
+                "disponibles": espacios_disponibles,
+                "ocupados": espacios_ocupados,
+                "reservados": espacios_reservados,
+                "total": total_espacios
+            },
+            "incidentes": incidentes_dict  # Lista completa de incidentes
+        }
+        
+    except Exception as e:
+        print(f"❌ Error en /reports/completo: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/estadisticas/actual")
+def obtener_estadisticas_actuales(db: Session = Depends(get_db)):
+    """Obtener estadísticas en tiempo real (sin filtro de semana)"""
+    try:
+        espacios = db.query(Espacio).all()
+        
+        disponibles = sum(1 for e in espacios if e.estado == 'libre')
+        ocupados = sum(1 for e in espacios if e.estado == 'ocupado')
+        reservados = sum(1 for e in espacios if e.reservado == 'si')
+        
+        return {
+            "disponibles": disponibles,
+            "ocupados": ocupados,
+            "reservados": reservados,
+            "total": len(espacios),
+            "porcentaje_ocupacion": round((ocupados / len(espacios) * 100), 0) if espacios else 0
         }
     except Exception as e:
-        return {"error": str(e)}
+        print(f"Error en estadisticas/actual: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/vehiculos-por-dia")
+def obtener_vehiculos_por_dia(db: Session = Depends(get_db)):
+    """Obtener vehículos ingresados por día en la semana actual"""
+    try:
+        fecha_inicio, fecha_fin = get_semana_actual()
+        
+        asignaciones = db.query(Asignacion).filter(
+            Asignacion.hora_asignado >= fecha_inicio,
+            Asignacion.hora_asignado <= fecha_fin
+        ).all()
+        
+        conteo_por_fecha = {}
+        for asig in asignaciones:
+            fecha_str = asig.hora_asignado.date().isoformat()
+            conteo_por_fecha[fecha_str] = conteo_por_fecha.get(fecha_str, 0) + 1
+        
+        dias_es = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+        resultado = []
+        
+        fecha_actual = fecha_inicio.date()
+        while fecha_actual <= fecha_fin.date():
+            fecha_str = fecha_actual.isoformat()
+            dia_semana = dias_es[fecha_actual.weekday()]
+            cantidad = conteo_por_fecha.get(fecha_str, 0)
+            
+            resultado.append({
+                "fecha": fecha_str,
+                "cantidad": cantidad,
+                "dia_semana": dia_semana
+            })
+            
+            fecha_actual += timedelta(days=1)
+        
+        return resultado
+        
+    except Exception as e:
+        print(f"Error en vehiculos-por-dia: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
